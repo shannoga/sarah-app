@@ -1,18 +1,27 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 function ChatInterface() {
-  const [message, setMessage] = useState('');
-  const [response, setResponse] = useState('');
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!message.trim()) return;
+    if (!input.trim() || loading) return;
 
+    const userMessage = input.trim();
+    setInput('');
+    setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setLoading(true);
-    setError('');
-    setResponse('');
 
     try {
       const res = await fetch('/api/chat', {
@@ -20,7 +29,7 @@ function ChatInterface() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message: userMessage }),
       });
 
       if (!res.ok) {
@@ -28,54 +37,86 @@ function ChatInterface() {
       }
 
       const data = await res.json();
-      setResponse(data.response);
+      setMessages((prev) => [...prev, { role: 'assistant', content: data.response }]);
     } catch (err) {
-      setError(err.message || 'Something went wrong');
+      setMessages((prev) => [
+        ...prev,
+        { role: 'error', content: err.message || 'Something went wrong' },
+      ]);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e);
+    }
+  };
+
   return (
-    <div className="space-y-6">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label htmlFor="message" className="block text-sm font-medium text-gray-700 mb-2">
-            Your Question
-          </label>
+    <div className="flex flex-col h-[600px] bg-white rounded-lg shadow-sm border border-gray-200">
+      {/* Messages container */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.length === 0 && (
+          <div className="text-center text-gray-500 mt-8">
+            <p>Start a conversation with Claude</p>
+          </div>
+        )}
+        {messages.map((msg, index) => (
+          <div
+            key={index}
+            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div
+              className={`max-w-[80%] px-4 py-3 rounded-2xl ${
+                msg.role === 'user'
+                  ? 'bg-blue-600 text-white rounded-br-md'
+                  : msg.role === 'error'
+                  ? 'bg-red-100 text-red-700 rounded-bl-md'
+                  : 'bg-gray-100 text-gray-800 rounded-bl-md'
+              }`}
+            >
+              <p className="whitespace-pre-wrap">{msg.content}</p>
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div className="flex justify-start">
+            <div className="bg-gray-100 text-gray-800 px-4 py-3 rounded-2xl rounded-bl-md">
+              <div className="flex space-x-2">
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              </div>
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input form */}
+      <form onSubmit={handleSubmit} className="p-4 border-t border-gray-200">
+        <div className="flex space-x-3">
           <textarea
-            id="message"
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="Ask Claude anything..."
-            rows={4}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Type a message..."
+            rows={1}
+            className="flex-1 px-4 py-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
             disabled={loading}
           />
+          <button
+            type="submit"
+            disabled={loading || !input.trim()}
+            className="px-6 py-3 bg-blue-600 text-white rounded-full font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+          >
+            Send
+          </button>
         </div>
-        <button
-          type="submit"
-          disabled={loading || !message.trim()}
-          className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-        >
-          {loading ? 'Sending...' : 'Send Message'}
-        </button>
       </form>
-
-      {error && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-red-700">{error}</p>
-        </div>
-      )}
-
-      {response && (
-        <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
-          <h2 className="text-sm font-medium text-gray-500 mb-3">Claude's Response</h2>
-          <div className="prose prose-gray max-w-none">
-            <p className="text-gray-800 whitespace-pre-wrap">{response}</p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
