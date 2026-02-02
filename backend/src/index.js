@@ -15,10 +15,11 @@ dotenv.config({ path: join(__dirname, '..', '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const FRONTEND_URL = process.env.FRONTEND_URL || '${FRONTEND_URL}';
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: FRONTEND_URL,
   credentials: true,
 }));
 app.use(express.json());
@@ -52,7 +53,7 @@ app.get('/', (req, res) => {
       'GET /api/mcp/callback': 'OAuth callback',
       'GET /health': 'Health check',
     },
-    frontend: 'http://localhost:5173',
+    frontend: '${FRONTEND_URL}',
   });
 });
 
@@ -79,7 +80,7 @@ oauthCallbackApp.get('/callback', async (req, res) => {
           <body style="font-family: system-ui; padding: 40px; text-align: center;">
             <h1>Connection Failed</h1>
             <p>${error_description || error}</p>
-            <p><a href="http://localhost:5173">Return to app</a></p>
+            <p><a href="${FRONTEND_URL}">Return to app</a></p>
           </body>
         </html>
       `);
@@ -103,7 +104,7 @@ oauthCallbackApp.get('/callback', async (req, res) => {
               window.opener.postMessage({ type: 'oauth_complete', server: '${result.serverId}' }, '*');
               window.close();
             } else {
-              setTimeout(() => window.location.href = 'http://localhost:5173', 2000);
+              setTimeout(() => window.location.href = '${FRONTEND_URL}', 2000);
             }
           </script>
         </head>
@@ -122,7 +123,7 @@ oauthCallbackApp.get('/callback', async (req, res) => {
         <body style="font-family: system-ui; padding: 40px; text-align: center;">
           <h1>Connection Error</h1>
           <p>${error.message}</p>
-          <p><a href="http://localhost:5173">Return to app</a></p>
+          <p><a href="${FRONTEND_URL}">Return to app</a></p>
         </body>
       </html>
     `);

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { apiUrl } from '../config';
 
 function IntegrationStatus() {
   const [status, setStatus] = useState({ servers: [], status: [] });
@@ -7,7 +8,7 @@ function IntegrationStatus() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/mcp/status', {
+      const res = await fetch(apiUrl('/api/mcp/status'), {
         credentials: 'include',
       });
       if (!res.ok) throw new Error('Failed to fetch status');
@@ -37,7 +38,7 @@ function IntegrationStatus() {
 
   const handleConnect = async (serverId) => {
     try {
-      const res = await fetch(`/api/mcp/connect/${serverId}`, {
+      const res = await fetch(apiUrl(`/api/mcp/connect/${serverId}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -58,7 +59,7 @@ function IntegrationStatus() {
 
   const handleDisconnect = async (serverId) => {
     try {
-      const res = await fetch(`/api/mcp/disconnect/${serverId}`, {
+      const res = await fetch(apiUrl(`/api/mcp/disconnect/${serverId}`), {
         method: 'DELETE',
         credentials: 'include',
       });

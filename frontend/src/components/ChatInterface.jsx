@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { apiUrl } from '../config';
 
 function ChatInterface() {
   const [messages, setMessages] = useState([]);
@@ -47,7 +48,7 @@ function ChatInterface() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
