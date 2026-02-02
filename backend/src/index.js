@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import chatRouter from './routes/chat.js';
+import agentRouter from './routes/agent.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -18,6 +19,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api/chat', chatRouter);
+app.use('/api/agent', agentRouter);
 
 // Root endpoint
 app.get('/', (req, res) => {

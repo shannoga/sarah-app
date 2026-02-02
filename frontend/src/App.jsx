@@ -1,4 +1,5 @@
 import ChatInterface from './components/ChatInterface';
+import AgentConfig from './components/AgentConfig';
 
 function App() {
   return (
@@ -10,6 +11,7 @@ function App() {
         </div>
       </header>
       <main className="max-w-4xl mx-auto py-6 px-4">
+        <AgentConfig />
         <ChatInterface />
       </main>
     </div>
