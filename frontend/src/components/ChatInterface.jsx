@@ -4,6 +4,8 @@ function ChatInterface() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState([]);
+  const [useTools, setUseTools] = useState(true);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -13,6 +15,27 @@ function ChatInterface() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Listen for OAuth completion
+  useEffect(() => {
+    const handleMessage = (event) => {
+      if (event.data?.type === 'oauth_complete') {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'system',
+            content: `Connected to ${event.data.server}! You can now ask questions about your data.`,
+          },
+        ]);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  const handleOAuthClick = (authUrl) => {
+    window.open(authUrl, 'oauth', 'width=600,height=700');
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -29,7 +52,12 @@ function ChatInterface() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: userMessage }),
+        credentials: 'include',
+        body: JSON.stringify({
+          message: userMessage,
+          useTools,
+          conversationHistory,
+        }),
       });
 
       if (!res.ok) {
@@ -37,6 +65,29 @@ function ChatInterface() {
       }
 
       const data = await res.json();
+
+      // Update conversation history if using tools
+      if (data.conversationHistory) {
+        setConversationHistory(data.conversationHistory);
+      }
+
+      // Handle OAuth actions
+      if (data.oauthActions && data.oauthActions.length > 0) {
+        for (const action of data.oauthActions) {
+          if (action.type === 'oauth') {
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: 'assistant',
+                content: data.response,
+                oauthUrl: action.authUrl,
+              },
+            ]);
+            return;
+          }
+        }
+      }
+
       setMessages((prev) => [...prev, { role: 'assistant', content: data.response }]);
     } catch (err) {
       setMessages((prev) => [
@@ -75,10 +126,20 @@ function ChatInterface() {
                   ? 'bg-blue-600 text-white rounded-br-md'
                   : msg.role === 'error'
                   ? 'bg-red-100 text-red-700 rounded-bl-md'
+                  : msg.role === 'system'
+                  ? 'bg-green-50 text-green-700 rounded-bl-md border border-green-200'
                   : 'bg-gray-100 text-gray-800 rounded-bl-md'
               }`}
             >
               <p className="whitespace-pre-wrap">{msg.content}</p>
+              {msg.oauthUrl && (
+                <button
+                  onClick={() => handleOAuthClick(msg.oauthUrl)}
+                  className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                >
+                  Connect to Mixpanel
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -97,26 +158,50 @@ function ChatInterface() {
       </div>
 
       {/* Input form */}
-      <form onSubmit={handleSubmit} className="p-4 border-t border-gray-200">
-        <div className="flex space-x-3">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type a message..."
-            rows={1}
-            className="flex-1 px-4 py-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-            disabled={loading}
-          />
-          <button
-            type="submit"
-            disabled={loading || !input.trim()}
-            className="px-6 py-3 bg-blue-600 text-white rounded-full font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            Send
-          </button>
+      <div className="p-4 border-t border-gray-200">
+        <div className="flex items-center justify-between mb-3">
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            <input
+              type="checkbox"
+              checked={useTools}
+              onChange={(e) => setUseTools(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+            />
+            Enable integrations
+          </label>
+          {messages.length > 0 && (
+            <button
+              onClick={() => {
+                setMessages([]);
+                setConversationHistory([]);
+              }}
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              Clear chat
+            </button>
+          )}
         </div>
-      </form>
+        <form onSubmit={handleSubmit}>
+          <div className="flex space-x-3">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type a message..."
+              rows={1}
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              disabled={loading}
+            />
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className="px-6 py-3 bg-blue-600 text-white rounded-full font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              Send
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

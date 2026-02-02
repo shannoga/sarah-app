@@ -1,5 +1,6 @@
 import ChatInterface from './components/ChatInterface';
 import AgentConfig from './components/AgentConfig';
+import IntegrationStatus from './components/IntegrationStatus';
 
 function App() {
   return (
@@ -11,6 +12,7 @@ function App() {
         </div>
       </header>
       <main className="max-w-4xl mx-auto py-6 px-4">
+        <IntegrationStatus />
         <AgentConfig />
         <ChatInterface />
       </main>

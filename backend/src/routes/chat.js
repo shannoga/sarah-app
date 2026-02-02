@@ -1,18 +1,28 @@
 import express from 'express';
-import { sendMessage } from '../services/claude.js';
+import { sendMessage, sendMessageWithTools } from '../services/claude.js';
 
 const router = express.Router();
 
 router.post('/', async (req, res) => {
   try {
-    const { message } = req.body;
+    const { message, useTools = false, conversationHistory = [] } = req.body;
 
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    const response = await sendMessage(message);
-    res.json({ response });
+    if (useTools) {
+      const sessionId = req.session?.id;
+      if (!sessionId) {
+        return res.status(401).json({ error: 'Session required for tool use' });
+      }
+
+      const result = await sendMessageWithTools(sessionId, message, conversationHistory);
+      res.json(result);
+    } else {
+      const response = await sendMessage(message);
+      res.json({ response });
+    }
   } catch (error) {
     console.error('Chat error:', error);
     res.status(500).json({ error: 'Failed to get response from Claude' });
