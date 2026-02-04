@@ -109,3 +109,18 @@ export function getAllTokens(sessionId) {
 export function clearSession(sessionId) {
   sessions.delete(sessionId);
 }
+
+// API Settings (API key and model selection)
+export function setApiSettings(sessionId, settings) {
+  const session = getSession(sessionId);
+  session.apiSettings = {
+    ...session.apiSettings,
+    ...settings,
+    updated_at: Date.now(),
+  };
+}
+
+export function getApiSettings(sessionId) {
+  const session = getSession(sessionId);
+  return session.apiSettings || {};
+}

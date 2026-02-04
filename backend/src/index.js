@@ -7,6 +7,7 @@ import { dirname, join } from 'path';
 import chatRouter from './routes/chat.js';
 import agentRouter from './routes/agent.js';
 import mcpRouter from './routes/mcp.js';
+import settingsRouter from './routes/settings.js';
 import { handleOAuthCallbackByState, getOAuthCallbackPorts } from './services/mcpManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -41,6 +42,7 @@ app.use(session({
 app.use('/api/chat', chatRouter);
 app.use('/api/agent', agentRouter);
 app.use('/api/mcp', mcpRouter);
+app.use('/api/settings', settingsRouter);
 
 // Root endpoint
 app.get('/', (req, res) => {

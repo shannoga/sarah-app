@@ -1,16 +1,47 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getAllAvailableTools, executeTool } from './mcpManager.js';
+import { getApiSettings } from './sessionStore.js';
 
-let client = null;
+// Default client using server API key
+let defaultClient = null;
+
+// Default model to use
+const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+
 let systemPrompt = null;
 
-function getClient() {
-  if (!client) {
-    client = new Anthropic({
+function getDefaultClient() {
+  if (!defaultClient) {
+    defaultClient = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY,
     });
   }
-  return client;
+  return defaultClient;
+}
+
+// Get client for a specific session (uses user's API key if available)
+function getClientForSession(sessionId) {
+  if (!sessionId) {
+    return getDefaultClient();
+  }
+
+  const settings = getApiSettings(sessionId);
+  if (settings.apiKey) {
+    // Create a new client with user's API key
+    return new Anthropic({ apiKey: settings.apiKey });
+  }
+
+  return getDefaultClient();
+}
+
+// Get model for a specific session
+function getModelForSession(sessionId) {
+  if (!sessionId) {
+    return DEFAULT_MODEL;
+  }
+
+  const settings = getApiSettings(sessionId);
+  return settings.model || DEFAULT_MODEL;
 }
 
 export function setSystemPrompt(prompt) {
@@ -21,9 +52,12 @@ export function getSystemPrompt() {
   return systemPrompt;
 }
 
-export async function sendMessage(userMessage) {
+export async function sendMessage(userMessage, sessionId = null) {
+  const client = getClientForSession(sessionId);
+  const model = getModelForSession(sessionId);
+
   const requestOptions = {
-    model: 'claude-sonnet-4-20250514',
+    model,
     max_tokens: 1024,
     messages: [
       {
@@ -37,7 +71,7 @@ export async function sendMessage(userMessage) {
     requestOptions.system = systemPrompt;
   }
 
-  const response = await getClient().messages.create(requestOptions);
+  const response = await client.messages.create(requestOptions);
 
   // Extract text from the response
   const textContent = response.content.find((block) => block.type === 'text');
@@ -49,6 +83,8 @@ export async function getAvailableTools(sessionId) {
 }
 
 export async function sendMessageWithTools(sessionId, userMessage, conversationHistory = []) {
+  const client = getClientForSession(sessionId);
+  const model = getModelForSession(sessionId);
   const tools = await getAvailableTools(sessionId);
   const oauthActions = [];
 
@@ -63,7 +99,7 @@ export async function sendMessageWithTools(sessionId, userMessage, conversationH
   const toolSystemPrompt = `${baseSystemPrompt}
 
 You have access to MCP integrations that can help users access their data from various services.
-Available integrations include Mixpanel for analytics data.
+Available integrations include Mixpanel for analytics data and Jira for project management.
 
 When a user wants to connect to an integration:
 1. Use the connect_integration tool to get the OAuth URL
@@ -73,7 +109,7 @@ When a user wants to connect to an integration:
 When querying data from integrations, be helpful and explain what you're doing.`;
 
   const requestOptions = {
-    model: 'claude-sonnet-4-20250514',
+    model,
     max_tokens: 4096,
     system: toolSystemPrompt,
     messages,
@@ -88,7 +124,7 @@ When querying data from integrations, be helpful and explain what you're doing.`
     })),
   };
 
-  let response = await getClient().messages.create(requestOptions);
+  let response = await client.messages.create(requestOptions);
   let iterations = 0;
   const maxIterations = 10;
 
@@ -142,7 +178,7 @@ When querying data from integrations, be helpful and explain what you're doing.`
     });
 
     // Continue the conversation
-    response = await getClient().messages.create({
+    response = await client.messages.create({
       ...requestOptions,
       messages,
     });
