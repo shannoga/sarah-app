@@ -15,7 +15,7 @@ dotenv.config({ path: join(__dirname, '..', '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const FRONTEND_URL = process.env.FRONTEND_URL || '${FRONTEND_URL}';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 // Middleware
 app.use(cors({
@@ -53,7 +53,7 @@ app.get('/', (req, res) => {
       'GET /api/mcp/callback': 'OAuth callback',
       'GET /health': 'Health check',
     },
-    frontend: '${FRONTEND_URL}',
+    frontend: FRONTEND_URL,
   });
 });
 
@@ -67,9 +67,11 @@ app.listen(PORT, () => {
 });
 
 // OAuth Callback Server on port 8001 (required by Mixpanel's whitelist)
-const oauthCallbackApp = express();
+// Only runs in development - production requires Mixpanel to whitelist your domain
+if (process.env.NODE_ENV !== 'production') {
+  const oauthCallbackApp = express();
 
-oauthCallbackApp.get('/callback', async (req, res) => {
+  oauthCallbackApp.get('/callback', async (req, res) => {
   try {
     const { code, state, error, error_description } = req.query;
 
@@ -130,6 +132,7 @@ oauthCallbackApp.get('/callback', async (req, res) => {
   }
 });
 
-oauthCallbackApp.listen(OAUTH_CALLBACK_PORT, () => {
-  console.log(`OAuth callback server running on http://localhost:${OAUTH_CALLBACK_PORT}`);
-});
+  oauthCallbackApp.listen(OAUTH_CALLBACK_PORT, () => {
+    console.log(`OAuth callback server running on http://localhost:${OAUTH_CALLBACK_PORT}`);
+  });
+}
