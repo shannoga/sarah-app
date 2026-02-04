@@ -4,6 +4,7 @@ import {
   getAllServerStatus,
   initiateOAuthFlow,
   handleOAuthCallback,
+  handleOAuthCallbackByState,
   disconnectMcp,
   listMcpTools,
 } from '../services/mcpManager.js';
@@ -55,13 +56,11 @@ router.post('/connect/:server', async (req, res) => {
 });
 
 // OAuth callback endpoint
+// Uses state-based lookup so it works even when session isn't preserved across redirect
 router.get('/callback', async (req, res) => {
-  try {
-    const sessionId = req.session?.id;
-    if (!sessionId) {
-      return res.status(401).send('Session required. Please try connecting again.');
-    }
+  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
+  try {
     const { code, state, error, error_description } = req.query;
 
     if (error) {
@@ -71,7 +70,7 @@ router.get('/callback', async (req, res) => {
           <body style="font-family: system-ui; padding: 40px; text-align: center;">
             <h1>Connection Failed</h1>
             <p>${error_description || error}</p>
-            <p><a href="/">Return to app</a></p>
+            <p><a href="${FRONTEND_URL}">Return to app</a></p>
           </body>
         </html>
       `);
@@ -81,7 +80,8 @@ router.get('/callback', async (req, res) => {
       return res.status(400).send('Missing authorization code or state');
     }
 
-    const result = await handleOAuthCallback(sessionId, code, state);
+    // Use state-based lookup to find the original session
+    const result = await handleOAuthCallbackByState(code, state);
 
     // Redirect back to the frontend with success
     res.send(`
@@ -95,7 +95,7 @@ router.get('/callback', async (req, res) => {
               window.close();
             } else {
               // Redirect after a short delay
-              setTimeout(() => window.location.href = '/', 2000);
+              setTimeout(() => window.location.href = '${FRONTEND_URL}', 2000);
             }
           </script>
         </head>
@@ -114,7 +114,7 @@ router.get('/callback', async (req, res) => {
         <body style="font-family: system-ui; padding: 40px; text-align: center;">
           <h1>Connection Error</h1>
           <p>${error.message}</p>
-          <p><a href="/">Return to app</a></p>
+          <p><a href="${FRONTEND_URL}">Return to app</a></p>
         </body>
       </html>
     `);

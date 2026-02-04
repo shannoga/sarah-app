@@ -3,9 +3,11 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { getToken, setToken, setOAuthState, getOAuthState, clearOAuthState, findOAuthStateByToken } from './sessionStore.js';
 import crypto from 'crypto';
 
-// Allowed redirect URI from Mixpanel's whitelist
+// OAuth callback configuration
+// In production, use OAUTH_CALLBACK_URL env var (requires Mixpanel to whitelist your domain)
+// In development, defaults to localhost:8001 (pre-whitelisted by Mixpanel)
 const OAUTH_CALLBACK_PORT = 8001;
-const OAUTH_REDIRECT_URI = `http://localhost:${OAUTH_CALLBACK_PORT}/callback`;
+const OAUTH_REDIRECT_URI = process.env.OAUTH_CALLBACK_URL || `http://localhost:${OAUTH_CALLBACK_PORT}/callback`;
 
 // MCP server configurations
 const MCP_SERVERS = {
