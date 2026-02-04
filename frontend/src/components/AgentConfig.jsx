@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { apiUrl } from '../config';
 
 function AgentConfig() {
   const [prompt, setPrompt] = useState(null);
@@ -12,7 +13,7 @@ function AgentConfig() {
 
   const fetchPrompt = async () => {
     try {
-      const res = await fetch('/api/agent');
+      const res = await fetch(apiUrl('/api/agent'));
       const data = await res.json();
       setPrompt(data.prompt);
     } catch (err) {
@@ -29,7 +30,7 @@ function AgentConfig() {
 
     try {
       const text = await file.text();
-      const res = await fetch('/api/agent', {
+      const res = await fetch(apiUrl('/api/agent'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: text }),
@@ -56,7 +57,7 @@ function AgentConfig() {
     setError(null);
 
     try {
-      const res = await fetch('/api/agent', { method: 'DELETE' });
+      const res = await fetch(apiUrl('/api/agent'), { method: 'DELETE' });
       if (!res.ok) {
         throw new Error('Failed to clear prompt');
       }
