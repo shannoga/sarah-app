@@ -4,12 +4,10 @@ import { getToken, setToken, setOAuthState, getOAuthState, clearOAuthState, find
 import crypto from 'crypto';
 
 // OAuth callback configuration
-// In production, use OAUTH_CALLBACK_URL env var (requires Mixpanel to whitelist your domain)
-// In development, defaults to localhost:8001 (pre-whitelisted by Mixpanel)
-const OAUTH_CALLBACK_PORT = 8001;
-const OAUTH_REDIRECT_URI = process.env.OAUTH_CALLBACK_URL || `http://localhost:${OAUTH_CALLBACK_PORT}/callback`;
+// Each MCP server may require a different callback port based on their OAuth whitelist
+// In production, use OAUTH_CALLBACK_URL_* env vars (requires providers to whitelist your domain)
 
-// MCP server configurations
+// MCP server configurations with per-server callback ports
 const MCP_SERVERS = {
   mixpanel: {
     name: 'Mixpanel',
@@ -21,14 +19,46 @@ const MCP_SERVERS = {
     },
     defaultRegion: 'us',
     registrationEndpoint: 'https://mcp.mixpanel.com/oauth/register',
+    callbackPort: 8001, // Mixpanel whitelists localhost:8001
+  },
+  jira: {
+    name: 'Jira (Atlassian Rovo)',
+    description: 'Jira and Confluence integration via Atlassian Rovo MCP',
+    endpoints: {
+      default: 'https://mcp.atlassian.com/v1/mcp',
+    },
+    defaultRegion: 'default',
+    callbackPort: 5598, // Atlassian whitelists localhost:5598
   },
 };
+
+// Get the redirect URI for a specific server
+function getRedirectUri(serverId) {
+  const serverConfig = MCP_SERVERS[serverId];
+  const envVar = `OAUTH_CALLBACK_URL_${serverId.toUpperCase()}`;
+  if (process.env[envVar]) {
+    return process.env[envVar];
+  }
+  const port = serverConfig?.callbackPort || 8001;
+  return `http://localhost:${port}/callback`;
+}
+
+// Get all unique callback ports for starting OAuth servers
+export function getOAuthCallbackPorts() {
+  const ports = new Set();
+  for (const config of Object.values(MCP_SERVERS)) {
+    if (config.callbackPort) {
+      ports.add(config.callbackPort);
+    }
+  }
+  return Array.from(ports);
+}
 
 // Cache of MCP clients per session
 const clientCache = new Map();
 
-// Cache for dynamically registered client credentials
-let registeredClient = null;
+// Cache for dynamically registered client credentials per registration endpoint
+const registeredClients = new Map();
 
 function generatePKCE() {
   const verifier = crypto.randomBytes(32).toString('base64url');
@@ -40,13 +70,17 @@ function generateState() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-async function registerDynamicClient(registrationEndpoint) {
-  // Return cached client if available
-  if (registeredClient) {
-    return registeredClient;
+async function registerDynamicClient(registrationEndpoint, redirectUri) {
+  // Cache key includes redirect URI since different servers may need different redirects
+  const cacheKey = `${registrationEndpoint}:${redirectUri}`;
+
+  // Return cached client if available for this registration endpoint + redirect URI combo
+  if (registeredClients.has(cacheKey)) {
+    return registeredClients.get(cacheKey);
   }
 
-  console.log('Registering dynamic OAuth client...');
+  console.log('Registering dynamic OAuth client at:', registrationEndpoint);
+  console.log('With redirect URI:', redirectUri);
 
   const response = await fetch(registrationEndpoint, {
     method: 'POST',
@@ -55,7 +89,7 @@ async function registerDynamicClient(registrationEndpoint) {
     },
     body: JSON.stringify({
       client_name: 'Sarah Chat App',
-      redirect_uris: [OAUTH_REDIRECT_URI],
+      redirect_uris: [redirectUri],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
       token_endpoint_auth_method: 'none',
@@ -67,14 +101,16 @@ async function registerDynamicClient(registrationEndpoint) {
     throw new Error(`Dynamic client registration failed: ${error}`);
   }
 
-  registeredClient = await response.json();
+  const registeredClient = await response.json();
+  registeredClients.set(cacheKey, registeredClient);
   console.log('Registered client_id:', registeredClient.client_id);
   console.log('Allowed redirect_uris:', registeredClient.redirect_uris);
 
   return registeredClient;
 }
 
-export { OAUTH_CALLBACK_PORT, OAUTH_REDIRECT_URI };
+// Export MCP_SERVERS for index.js to access callback ports
+export { MCP_SERVERS };
 
 export function getAvailableServers() {
   return Object.entries(MCP_SERVERS).map(([id, config]) => ({
@@ -105,15 +141,16 @@ export async function initiateOAuthFlow(sessionId, serverId, region = 'us') {
   }
 
   const endpoint = serverConfig.endpoints[region] || serverConfig.endpoints[serverConfig.defaultRegion];
+  const redirectUri = getRedirectUri(serverId);
 
   // Generate PKCE and state
   const pkce = generatePKCE();
   const state = generateState();
 
-  // For Mixpanel MCP, we need to discover the OAuth endpoints
-  // The MCP server should return 401 with WWW-Authenticate header
+  // MCP servers return 401 with WWW-Authenticate header for OAuth discovery
   try {
-    console.log('Discovering OAuth endpoints from MCP server...');
+    console.log(`Discovering OAuth endpoints from ${serverId} MCP server...`);
+    console.log('Using redirect URI:', redirectUri);
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -137,67 +174,92 @@ export async function initiateOAuthFlow(sessionId, serverId, region = 'us') {
       const wwwAuth = response.headers.get('WWW-Authenticate');
       console.log('WWW-Authenticate header:', wwwAuth);
 
+      let oauthMetadata = null;
+      let resourceMetadata = null;
+
       if (wwwAuth) {
         const resourceMetadataMatch = wwwAuth.match(/resource_metadata="([^"]+)"/);
         if (resourceMetadataMatch) {
+          // MCP-style OAuth discovery via resource_metadata
           const resourceMetadataUrl = resourceMetadataMatch[1];
           console.log('Resource metadata URL:', resourceMetadataUrl);
 
-          // Fetch resource metadata to get authorization server
-          const resourceMetadata = await fetch(resourceMetadataUrl).then(r => r.json());
+          resourceMetadata = await fetch(resourceMetadataUrl).then(r => r.json());
           const authServerUrl = resourceMetadata.authorization_servers?.[0];
           console.log('Auth server URL:', authServerUrl);
 
           if (authServerUrl) {
-            // Fetch OAuth server metadata
             const oauthMetadataUrl = `${authServerUrl}.well-known/oauth-authorization-server`;
             console.log('OAuth metadata URL:', oauthMetadataUrl);
-            const oauthMetadata = await fetch(oauthMetadataUrl).then(r => r.json());
-            console.log('OAuth metadata:', JSON.stringify(oauthMetadata, null, 2));
-
-            // Register dynamic client if registration endpoint exists
-            let clientId;
-            if (oauthMetadata.registration_endpoint) {
-              const client = await registerDynamicClient(oauthMetadata.registration_endpoint);
-              clientId = client.client_id;
-            } else {
-              clientId = process.env.MIXPANEL_CLIENT_ID || 'sarah-chat-app';
-            }
-
-            // Store OAuth state for callback verification
-            setOAuthState(sessionId, state, {
-              serverId,
-              region,
-              endpoint,
-              codeVerifier: pkce.verifier,
-              tokenEndpoint: oauthMetadata.token_endpoint,
-              authorizationEndpoint: oauthMetadata.authorization_endpoint,
-              clientId,
-            });
-
-            // Build OAuth URL with scopes from metadata
-            const authUrl = new URL(oauthMetadata.authorization_endpoint);
-            authUrl.searchParams.set('response_type', 'code');
-            authUrl.searchParams.set('client_id', clientId);
-            authUrl.searchParams.set('redirect_uri', OAUTH_REDIRECT_URI);
-            authUrl.searchParams.set('state', state);
-            authUrl.searchParams.set('code_challenge', pkce.challenge);
-            authUrl.searchParams.set('code_challenge_method', 'S256');
-
-            // Use supported scopes from metadata
-            const scopes = resourceMetadata.scopes_supported || oauthMetadata.scopes_supported || [];
-            if (scopes.length > 0) {
-              authUrl.searchParams.set('scope', scopes.join(' '));
-            }
-
-            console.log('OAuth URL:', authUrl.toString());
-
-            return {
-              authUrl: authUrl.toString(),
-              state,
-            };
+            oauthMetadata = await fetch(oauthMetadataUrl).then(r => r.json());
           }
         }
+      }
+
+      // Fallback: Try standard OAuth discovery at the server's base URL
+      if (!oauthMetadata) {
+        const endpointUrl = new URL(endpoint);
+        const wellKnownUrl = `${endpointUrl.origin}/.well-known/oauth-authorization-server`;
+        console.log('Trying standard OAuth discovery at:', wellKnownUrl);
+
+        try {
+          const wellKnownResponse = await fetch(wellKnownUrl);
+          if (wellKnownResponse.ok) {
+            oauthMetadata = await wellKnownResponse.json();
+            console.log('Found OAuth metadata via standard discovery');
+          }
+        } catch (e) {
+          console.log('Standard OAuth discovery failed:', e.message);
+        }
+      }
+
+      if (oauthMetadata) {
+        console.log('OAuth metadata:', JSON.stringify(oauthMetadata, null, 2));
+
+        // Register dynamic client if registration endpoint exists
+        let clientId;
+        if (oauthMetadata.registration_endpoint) {
+          const client = await registerDynamicClient(oauthMetadata.registration_endpoint, redirectUri);
+          clientId = client.client_id;
+        } else {
+          // Fallback to env var for pre-registered clients
+          const envClientId = process.env[`${serverId.toUpperCase()}_CLIENT_ID`];
+          clientId = envClientId || 'sarah-chat-app';
+        }
+
+        // Store OAuth state for callback verification (including redirectUri for token exchange)
+        setOAuthState(sessionId, state, {
+          serverId,
+          region,
+          endpoint,
+          codeVerifier: pkce.verifier,
+          tokenEndpoint: oauthMetadata.token_endpoint,
+          authorizationEndpoint: oauthMetadata.authorization_endpoint,
+          clientId,
+          redirectUri,
+        });
+
+        // Build OAuth URL with scopes from metadata
+        const authUrl = new URL(oauthMetadata.authorization_endpoint);
+        authUrl.searchParams.set('response_type', 'code');
+        authUrl.searchParams.set('client_id', clientId);
+        authUrl.searchParams.set('redirect_uri', redirectUri);
+        authUrl.searchParams.set('state', state);
+        authUrl.searchParams.set('code_challenge', pkce.challenge);
+        authUrl.searchParams.set('code_challenge_method', 'S256');
+
+        // Use supported scopes from metadata
+        const scopes = resourceMetadata?.scopes_supported || oauthMetadata.scopes_supported || [];
+        if (scopes.length > 0) {
+          authUrl.searchParams.set('scope', scopes.join(' '));
+        }
+
+        console.log('OAuth URL:', authUrl.toString());
+
+        return {
+          authUrl: authUrl.toString(),
+          state,
+        };
       }
     }
 
@@ -230,12 +292,12 @@ export async function handleOAuthCallback(sessionId, code, state) {
 }
 
 async function handleOAuthCallbackInternal(sessionId, code, state, oauthData) {
-  const { serverId, codeVerifier, tokenEndpoint, clientId } = oauthData;
+  const { serverId, codeVerifier, tokenEndpoint, clientId, redirectUri } = oauthData;
 
   console.log('Exchanging code for token...');
   console.log('Token endpoint:', tokenEndpoint);
   console.log('Client ID:', clientId);
-  console.log('Redirect URI:', OAUTH_REDIRECT_URI);
+  console.log('Redirect URI:', redirectUri);
 
   // Exchange code for token
   const tokenResponse = await fetch(tokenEndpoint, {
@@ -246,7 +308,7 @@ async function handleOAuthCallbackInternal(sessionId, code, state, oauthData) {
     body: new URLSearchParams({
       grant_type: 'authorization_code',
       code,
-      redirect_uri: OAUTH_REDIRECT_URI,
+      redirect_uri: redirectUri,
       client_id: clientId,
       code_verifier: codeVerifier,
     }),
@@ -260,6 +322,9 @@ async function handleOAuthCallbackInternal(sessionId, code, state, oauthData) {
 
   const tokenData = await tokenResponse.json();
   console.log('Token received successfully');
+  console.log('Token type:', tokenData.token_type);
+  console.log('Token keys:', Object.keys(tokenData));
+  console.log('Access token (first 20 chars):', tokenData.access_token?.substring(0, 20) + '...');
 
   // Store the token
   setToken(sessionId, serverId, {
@@ -298,11 +363,17 @@ export async function getMcpClient(sessionId, serverId, region = 'us') {
 
   const endpoint = serverConfig.endpoints[region] || serverConfig.endpoints[serverConfig.defaultRegion];
 
+  console.log(`Creating MCP client for ${serverId}`);
+  console.log('Endpoint:', endpoint);
+  console.log('Token type:', token.token_type);
+  console.log('Token (first 20 chars):', token.access_token?.substring(0, 20) + '...');
+
   // Create MCP client with HTTP transport
+  // Always use "Bearer" (capitalized) as per HTTP Authorization header standard
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
     requestInit: {
       headers: {
-        Authorization: `${token.token_type || 'Bearer'} ${token.access_token}`,
+        Authorization: `Bearer ${token.access_token}`,
       },
     },
   });
@@ -374,19 +445,19 @@ export async function getAllAvailableTools(sessionId) {
 
   tools.push({
     name: 'connect_integration',
-    description: 'Connect to an MCP integration like Mixpanel. Returns an OAuth URL the user must visit to authenticate.',
+    description: 'Connect to an MCP integration like Mixpanel or Jira. Returns an OAuth URL the user must visit to authenticate.',
     input_schema: {
       type: 'object',
       properties: {
         integration: {
           type: 'string',
-          description: 'The integration to connect to (e.g., "mixpanel")',
+          description: 'The integration to connect to (e.g., "mixpanel", "jira")',
           enum: Object.keys(MCP_SERVERS),
         },
         region: {
           type: 'string',
-          description: 'The region for the integration (us, eu, or india for Mixpanel)',
-          enum: ['us', 'eu', 'india'],
+          description: 'The region for the integration (us, eu, or india for Mixpanel; default for Jira)',
+          enum: ['us', 'eu', 'india', 'default'],
         },
       },
       required: ['integration'],

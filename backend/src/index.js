@@ -7,7 +7,7 @@ import { dirname, join } from 'path';
 import chatRouter from './routes/chat.js';
 import agentRouter from './routes/agent.js';
 import mcpRouter from './routes/mcp.js';
-import { handleOAuthCallbackByState, OAUTH_CALLBACK_PORT } from './services/mcpManager.js';
+import { handleOAuthCallbackByState, getOAuthCallbackPorts } from './services/mcpManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -66,73 +66,80 @@ app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
 
-// OAuth Callback Server on port 8001 (required by Mixpanel's whitelist)
-// Only runs in development - production requires Mixpanel to whitelist your domain
+// OAuth Callback Servers - each MCP provider may require a different port
+// Mixpanel whitelists localhost:8001, Atlassian whitelists localhost:5598
+// Only runs in development - production requires providers to whitelist your domain
 if (process.env.NODE_ENV !== 'production') {
-  const oauthCallbackApp = express();
+  const callbackPorts = getOAuthCallbackPorts();
 
-  oauthCallbackApp.get('/callback', async (req, res) => {
-  try {
-    const { code, state, error, error_description } = req.query;
+  // Create callback handler function (shared across all ports)
+  const createCallbackHandler = (port) => async (req, res) => {
+    try {
+      const { code, state, error, error_description } = req.query;
 
-    if (error) {
-      return res.status(400).send(`
+      if (error) {
+        return res.status(400).send(`
+          <html>
+            <head><title>Connection Failed</title></head>
+            <body style="font-family: system-ui; padding: 40px; text-align: center;">
+              <h1>Connection Failed</h1>
+              <p>${error_description || error}</p>
+              <p><a href="${FRONTEND_URL}">Return to app</a></p>
+            </body>
+          </html>
+        `);
+      }
+
+      if (!code || !state) {
+        return res.status(400).send('Missing authorization code or state');
+      }
+
+      console.log(`OAuth callback received on port ${port}`);
+      console.log('State:', state);
+
+      const result = await handleOAuthCallbackByState(code, state);
+
+      res.send(`
         <html>
-          <head><title>Connection Failed</title></head>
+          <head>
+            <title>Connected Successfully</title>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'oauth_complete', server: '${result.serverId}' }, '*');
+                window.close();
+              } else {
+                setTimeout(() => window.location.href = '${FRONTEND_URL}', 2000);
+              }
+            </script>
+          </head>
           <body style="font-family: system-ui; padding: 40px; text-align: center;">
-            <h1>Connection Failed</h1>
-            <p>${error_description || error}</p>
+            <h1>Connected Successfully!</h1>
+            <p>You have connected to ${result.serverId}.</p>
+            <p>You can close this window and return to the chat.</p>
+          </body>
+        </html>
+      `);
+    } catch (error) {
+      console.error('OAuth callback error:', error);
+      res.status(500).send(`
+        <html>
+          <head><title>Connection Error</title></head>
+          <body style="font-family: system-ui; padding: 40px; text-align: center;">
+            <h1>Connection Error</h1>
+            <p>${error.message}</p>
             <p><a href="${FRONTEND_URL}">Return to app</a></p>
           </body>
         </html>
       `);
     }
+  };
 
-    if (!code || !state) {
-      return res.status(400).send('Missing authorization code or state');
-    }
-
-    console.log('OAuth callback received on port 8001');
-    console.log('State:', state);
-
-    const result = await handleOAuthCallbackByState(code, state);
-
-    res.send(`
-      <html>
-        <head>
-          <title>Connected Successfully</title>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: 'oauth_complete', server: '${result.serverId}' }, '*');
-              window.close();
-            } else {
-              setTimeout(() => window.location.href = '${FRONTEND_URL}', 2000);
-            }
-          </script>
-        </head>
-        <body style="font-family: system-ui; padding: 40px; text-align: center;">
-          <h1>Connected Successfully!</h1>
-          <p>You have connected to ${result.serverId}.</p>
-          <p>You can close this window and return to the chat.</p>
-        </body>
-      </html>
-    `);
-  } catch (error) {
-    console.error('OAuth callback error:', error);
-    res.status(500).send(`
-      <html>
-        <head><title>Connection Error</title></head>
-        <body style="font-family: system-ui; padding: 40px; text-align: center;">
-          <h1>Connection Error</h1>
-          <p>${error.message}</p>
-          <p><a href="${FRONTEND_URL}">Return to app</a></p>
-        </body>
-      </html>
-    `);
+  // Start a callback server on each required port
+  for (const port of callbackPorts) {
+    const oauthCallbackApp = express();
+    oauthCallbackApp.get('/callback', createCallbackHandler(port));
+    oauthCallbackApp.listen(port, () => {
+      console.log(`OAuth callback server running on http://localhost:${port}`);
+    });
   }
-});
-
-  oauthCallbackApp.listen(OAUTH_CALLBACK_PORT, () => {
-    console.log(`OAuth callback server running on http://localhost:${OAUTH_CALLBACK_PORT}`);
-  });
 }

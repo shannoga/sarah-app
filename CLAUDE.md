@@ -157,8 +157,13 @@ VITE_API_URL=                        # Empty for dev (uses proxy), set for produ
   - OAuth via MCP dynamic client registration
   - Tools: segmentation, funnels, retention, events
 
+- **Jira (Atlassian Rovo)** - Jira and Confluence integration
+  - OAuth 2.1 via Atlassian MCP server
+  - Tools: Jira issues, Confluence pages, search, and more
+  - Endpoint: https://mcp.atlassian.com/v1/mcp
+
 ### OAuth Flow
-1. User asks to connect to Mixpanel
+1. User asks to connect to Mixpanel or Jira
 2. Claude uses `connect_integration` tool
 3. Backend discovers OAuth endpoints from MCP server
 4. User authenticates via popup
@@ -182,5 +187,8 @@ Both services have `railway.toml` configs. Deploy from GitHub:
 ## Known Limitations
 
 - **In-memory sessions**: Tokens lost on server restart (use Redis for production)
-- **Mixpanel OAuth whitelist**: Only localhost URLs are pre-approved
+- **OAuth whitelists**: Each provider has specific localhost port requirements:
+  - Mixpanel: `localhost:8001`
+  - Atlassian/Jira: `localhost:5598`
+  - Development starts callback servers on all required ports automatically
 - **Single region**: Currently hardcoded to US Mixpanel endpoint
