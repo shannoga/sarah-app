@@ -25,6 +25,13 @@ router.post('/', async (req, res) => {
     }
   } catch (error) {
     console.error('Chat error:', error);
+    if (error.status === 429) {
+      const retryAfter = error.headers?.['retry-after'] || 60;
+      return res.status(429).json({
+        error: `Rate limit exceeded. Please wait ${retryAfter} seconds and try again.`,
+        retryAfter: Number(retryAfter),
+      });
+    }
     res.status(500).json({ error: 'Failed to get response from Claude' });
   }
 });

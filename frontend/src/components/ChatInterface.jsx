@@ -8,6 +8,7 @@ function ChatInterface() {
   const [conversationHistory, setConversationHistory] = useState([]);
   const [useTools, setUseTools] = useState(true);
   const messagesEndRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -38,6 +39,13 @@ function ChatInterface() {
     window.open(authUrl, 'oauth', 'width=600,height=700');
   };
 
+  const handleCancel = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
@@ -47,6 +55,9 @@ function ChatInterface() {
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setLoading(true);
 
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
       const res = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
@@ -54,6 +65,7 @@ function ChatInterface() {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
+        signal: abortController.signal,
         body: JSON.stringify({
           message: userMessage,
           useTools,
@@ -62,7 +74,8 @@ function ChatInterface() {
       });
 
       if (!res.ok) {
-        throw new Error('Failed to get response');
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || 'Failed to get response');
       }
 
       const data = await res.json();
@@ -91,11 +104,19 @@ function ChatInterface() {
 
       setMessages((prev) => [...prev, { role: 'assistant', content: data.response }]);
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'error', content: err.message || 'Something went wrong' },
-      ]);
+      if (err.name === 'AbortError') {
+        setMessages((prev) => [
+          ...prev,
+          { role: 'system', content: 'Request cancelled.' },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          { role: 'error', content: err.message || 'Something went wrong' },
+        ]);
+      }
     } finally {
+      abortControllerRef.current = null;
       setLoading(false);
     }
   };
@@ -193,13 +214,23 @@ function ChatInterface() {
               className="flex-1 px-4 py-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
               disabled={loading}
             />
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="px-6 py-3 bg-blue-600 text-white rounded-full font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-            >
-              Send
-            </button>
+            {loading ? (
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="px-6 py-3 bg-red-500 text-white rounded-full font-medium hover:bg-red-600 transition-colors"
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim()}
+                className="px-6 py-3 bg-blue-600 text-white rounded-full font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+              >
+                Send
+              </button>
+            )}
           </div>
         </form>
       </div>

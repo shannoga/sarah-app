@@ -343,14 +343,7 @@ async function handleOAuthCallbackInternal(sessionId, code, state, oauthData) {
   };
 }
 
-export async function getMcpClient(sessionId, serverId, region = 'us') {
-  const cacheKey = `${sessionId}:${serverId}`;
-
-  // Return cached client if available
-  if (clientCache.has(cacheKey)) {
-    return clientCache.get(cacheKey);
-  }
-
+async function createMcpClient(sessionId, serverId, region = 'us') {
   const serverConfig = MCP_SERVERS[serverId];
   if (!serverConfig) {
     throw new Error(`Unknown MCP server: ${serverId}`);
@@ -385,9 +378,41 @@ export async function getMcpClient(sessionId, serverId, region = 'us') {
 
   await client.connect(transport);
 
+  return client;
+}
+
+export async function getMcpClient(sessionId, serverId, region = 'us') {
+  const cacheKey = `${sessionId}:${serverId}`;
+
+  // Return cached client if available
+  if (clientCache.has(cacheKey)) {
+    return clientCache.get(cacheKey);
+  }
+
+  const client = await createMcpClient(sessionId, serverId, region);
+
   // Cache the client
   clientCache.set(cacheKey, client);
 
+  return client;
+}
+
+// Invalidate cached client and create a fresh one
+async function reconnectMcpClient(sessionId, serverId, region = 'us') {
+  const cacheKey = `${sessionId}:${serverId}`;
+
+  // Close old client if exists
+  if (clientCache.has(cacheKey)) {
+    try {
+      await clientCache.get(cacheKey).close();
+    } catch (e) {
+      // Ignore close errors
+    }
+    clientCache.delete(cacheKey);
+  }
+
+  const client = await createMcpClient(sessionId, serverId, region);
+  clientCache.set(cacheKey, client);
   return client;
 }
 
@@ -397,15 +422,38 @@ export async function listMcpTools(sessionId, serverId, region = 'us') {
     const tools = await client.listTools();
     return tools.tools || [];
   } catch (error) {
+    // Retry once on session errors (server-side session expired)
+    if (error.code === 404 || error.message?.includes('Session not found')) {
+      console.log(`MCP session expired for ${serverId}, reconnecting...`);
+      try {
+        const client = await reconnectMcpClient(sessionId, serverId, region);
+        const tools = await client.listTools();
+        return tools.tools || [];
+      } catch (retryError) {
+        console.error(`Error listing tools for ${serverId} after reconnect:`, retryError);
+        return [];
+      }
+    }
     console.error(`Error listing tools for ${serverId}:`, error);
     return [];
   }
 }
 
 export async function callMcpTool(sessionId, serverId, toolName, args, region = 'us') {
-  const client = await getMcpClient(sessionId, serverId, region);
-  const result = await client.callTool({ name: toolName, arguments: args });
-  return result;
+  try {
+    const client = await getMcpClient(sessionId, serverId, region);
+    const result = await client.callTool({ name: toolName, arguments: args });
+    return result;
+  } catch (error) {
+    // Retry once on session errors (server-side session expired)
+    if (error.code === 404 || error.message?.includes('Session not found')) {
+      console.log(`MCP session expired for ${serverId}, reconnecting...`);
+      const client = await reconnectMcpClient(sessionId, serverId, region);
+      const result = await client.callTool({ name: toolName, arguments: args });
+      return result;
+    }
+    throw error;
+  }
 }
 
 export async function disconnectMcp(sessionId, serverId) {
