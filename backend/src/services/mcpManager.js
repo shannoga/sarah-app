@@ -30,6 +30,16 @@ const MCP_SERVERS = {
     defaultRegion: 'default',
     callbackPort: 5598, // Atlassian whitelists localhost:5598
   },
+  amplitude: {
+    name: 'Amplitude',
+    description: 'Product analytics, experiments, and user behavior insights',
+    endpoints: {
+      us: 'https://mcp.amplitude.com/mcp',
+      eu: 'https://mcp.eu.amplitude.com/mcp',
+    },
+    defaultRegion: 'us',
+    callbackPort: 5599,
+  },
 };
 
 // Get the redirect URI for a specific server
@@ -493,7 +503,7 @@ export async function getAllAvailableTools(sessionId) {
 
   tools.push({
     name: 'connect_integration',
-    description: 'Connect to an MCP integration like Mixpanel or Jira. Returns an OAuth URL the user must visit to authenticate.',
+    description: 'Connect to an MCP integration like Mixpanel, Jira, or Amplitude. Returns an OAuth URL the user must visit to authenticate.',
     input_schema: {
       type: 'object',
       properties: {
@@ -504,7 +514,7 @@ export async function getAllAvailableTools(sessionId) {
         },
         region: {
           type: 'string',
-          description: 'The region for the integration (us, eu, or india for Mixpanel; default for Jira)',
+          description: 'The region for the integration (us, eu, or india for Mixpanel; us, eu for Amplitude; default for Jira)',
           enum: ['us', 'eu', 'india', 'default'],
         },
       },

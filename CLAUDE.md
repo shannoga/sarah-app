@@ -162,8 +162,13 @@ VITE_API_URL=                        # Empty for dev (uses proxy), set for produ
   - Tools: Jira issues, Confluence pages, search, and more
   - Endpoint: https://mcp.atlassian.com/v1/mcp
 
+- **Amplitude** - Product analytics, experiments, and user behavior insights
+  - OAuth 2.0 via Amplitude MCP server
+  - Tools: charting, experiments, cohorts, feedback, and more
+  - Endpoints: https://mcp.amplitude.com/mcp (US), https://mcp.eu.amplitude.com/mcp (EU)
+
 ### OAuth Flow
-1. User asks to connect to Mixpanel or Jira
+1. User asks to connect to Mixpanel, Jira, or Amplitude
 2. Claude uses `connect_integration` tool
 3. Backend discovers OAuth endpoints from MCP server
 4. User authenticates via popup
@@ -190,5 +195,6 @@ Both services have `railway.toml` configs. Deploy from GitHub:
 - **OAuth whitelists**: Each provider has specific localhost port requirements:
   - Mixpanel: `localhost:8001`
   - Atlassian/Jira: `localhost:5598`
+  - Amplitude: `localhost:5599`
   - Development starts callback servers on all required ports automatically
 - **Single region**: Currently hardcoded to US Mixpanel endpoint
